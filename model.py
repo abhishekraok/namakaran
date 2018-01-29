@@ -1,5 +1,7 @@
 import tensorflow as tf
 import inspect
+import time
+import numpy as np
 
 
 def data_type():
@@ -23,14 +25,18 @@ class VerySmallConfig(object):
 
 
 class WordRNN:
-    def __init__(self, is_training, config, input_, tgt_vocab_size):
+    def __init__(self, is_training, config):
         """
 
         :type config: VerySmallConfig
         """
-        batch_size = input_.batch_size
-        num_steps = input_.num_steps
+        self.input_data = tf.placeholder(tf.int32, shape=[config.source_sequence_length])  # x
+        self.targets = tf.placeholder(tf.int32, shape=[config.source_sequence_length])  # y
+        self.num_steps = tf.placeholder(tf.int32, shape=1)  # length of input and output
+
         size = config.hidden_size
+        batch_size = config.batch_size
+        self.config = config
 
         # Slightly better results can be obtained with forget gate biases
         # initialized to 1 but the hyperparameters of the model would need to be
@@ -62,53 +68,10 @@ class WordRNN:
         with tf.device("/cpu:0"):
             embedding = tf.get_variable(
                 "embedding", [config.input_vocab_size, size], dtype=data_type())
-            inputs = tf.nn.embedding_lookup(embedding, input_.input_data)
+            inputs = tf.nn.embedding_lookup(embedding, self.input_data)
 
         if is_training and config.keep_prob < 1:
             inputs = tf.nn.dropout(inputs, config.keep_prob)
-
-        # # Build RNN cell
-        # encoder_cell = tf.nn.rnn_cell.BasicLSTMCell(config.hidden_size)
-        #
-        # # Run Dynamic RNN
-        # #   encoder_outputs: [max_time, batch_size, num_units]
-        # #   encoder_state: [batch_size, num_units]
-        # encoder_outputs, encoder_state = tf.nn.dynamic_rnn(
-        #     encoder_cell, inputs,
-        #     sequence_length=config.source_sequence_length, time_major=True)
-        #
-        # # Build RNN cell
-        # decoder_cell = tf.nn.rnn_cell.BasicLSTMCell(config.hidden_size)
-        #
-        # # Helper
-        # helper = tf.contrib.seq2seq.TrainingHelper(
-        #     decoder_emb_inp, decoder_lengths, time_major=True)
-        #
-        # projection_layer = layers_core.Dense(
-        #     tgt_vocab_size, use_bias=False)
-        # # Decoder
-        # decoder = tf.contrib.seq2seq.BasicDecoder(
-        #     decoder_cell, helper, encoder_state,
-        #     output_layer=projection_layer)
-        # # Dynamic decoding
-        # decoder_outputs, _ = tf.contrib.seq2seq.dynamic_decode(decoder, ...)
-        # logits = decoder_outputs.rnn_output
-        # crossent = tf.nn.sparse_softmax_cross_entropy_with_logits(
-        #     labels=decoder_outputs, logits=logits)
-        # train_loss = (tf.reduce_sum(crossent * target_weights) /
-        #     batch_size)
-        #
-        # # Calculate and clip gradients
-        # params = tf.trainable_variables()
-        # gradients = tf.gradients(train_loss, params)
-        # clipped_gradients, _ = tf.clip_by_global_norm(
-        #     gradients, config.max_grad_norm)
-        #
-
-
-
-
-
 
         # Simplified version of models/tutorials/rnn/rnn.py's rnn().
         # This builds an unrolled LSTM for tutorial purposes only.
@@ -122,7 +85,7 @@ class WordRNN:
         outputs = []
         state = self._initial_state
         with tf.variable_scope("RNN"):
-            for time_step in range(num_steps):
+            for time_step in range(config.source_sequence_length):
                 if time_step > 0: tf.get_variable_scope().reuse_variables()
                 (cell_output, state) = cell(inputs[:, time_step, :], state)
                 outputs.append(cell_output)
@@ -134,13 +97,13 @@ class WordRNN:
         logits = tf.matmul(output, softmax_w) + softmax_b
 
         # Reshape logits to be 3-D tensor for sequence loss
-        logits = tf.reshape(logits, [batch_size, num_steps, config.target_vocab_size])
+        logits = tf.reshape(logits, [batch_size, config.source_sequence_length, config.target_vocab_size])
 
         # use the contrib sequence loss and average over the batches
         loss = tf.contrib.seq2seq.sequence_loss(
             logits,
-            input_.targets,
-            tf.ones([batch_size, num_steps], dtype=data_type()),
+            self.targets,
+            tf.ones([batch_size, config.source_sequence_length], dtype=data_type()),
             average_across_timesteps=False,
             average_across_batch=True
         )
@@ -165,5 +128,25 @@ class WordRNN:
             tf.float32, shape=[], name="new_learning_rate")
         self._lr_update = tf.assign(self._lr, self._new_lr)
 
-        def train(self, x, y):
-            pass
+    def assign_lr(self, session, lr_value):
+        session.run(self._lr_update, feed_dict={self._new_lr: lr_value})
+
+    @property
+    def initial_state(self):
+        return self._initial_state
+
+    @property
+    def cost(self):
+        return self._cost
+
+    @property
+    def final_state(self):
+        return self._final_state
+
+    @property
+    def lr(self):
+        return self._lr
+
+    @property
+    def train_op(self):
+        return self._train_op
