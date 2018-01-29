@@ -99,3 +99,14 @@ ENV/
 
 # mypy
 .mypy_cache/
+
+### IPythonNotebook ###
+# Temporary data
+.ipynb_checkpoints/
+
+.idea/
+summaries/
+
+*.bat
+*.sh
+*.swp
